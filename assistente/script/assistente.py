@@ -20,6 +20,7 @@
 #On UNIX, run the command below in the terminal
 #export GROQ_API_KEY=real api key
 
+
 import os
 import re
 import time
@@ -102,9 +103,13 @@ radio_list_message = messages["other_messages"]["radio_list"]
 #Riconoscimento vocale parametri iniziali
 recognizer = sr.Recognizer()
 #sensibilità microfono fissa (es. 300) o dinamica
-recognizer.energy_threshold = 180
-#recognizer.dynamic_energy_threshold = 'False'
-recognizer.pause_threshold = 1.2
+#recognizer.energy_threshold = 180
+#recognizer.dynamic_energy_threshold = 'True'
+#recognizer.pause_threshold = 1.2
+
+recognizer.dynamic_energy_threshold = True
+recognizer.pause_threshold = 0.8
+recognizer.non_speaking_duration = 0.5
 
 #Per Windows
 
@@ -193,7 +198,7 @@ def cerca_youtube(query, max_risultati=5):
             return []
 
         # Mostra i risultati
-
+        urls= []
         for item in risposta["items"]:
             titolo = item["snippet"]["title"]
             url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
@@ -213,13 +218,18 @@ def speak(text):
     #Sintesi vocale del testo fornito.
     global parla_sintesi
 
-    parla_sintesi = True # Imposta il flag per bloccare il riconoscimento
-    tts = gTTS(text=text, lang='it')
-    tts.save("response.mp3")
-    playsound("response.mp3")
-    os.remove("response.mp3")
-    parla_sintesi = False  # Libera il flag per consentire il riconoscimento
+    def run():
+        global parla_sintesi
+        try:
+          parla_sintesi = True # Imposta il flag per bloccare il riconoscimento
+          tts = gTTS(text=text, lang='it')
+          tts.save("response.mp3")
+          playsound("response.mp3")
+          os.remove("response.mp3")
+        finally:
+          parla_sintesi = False  # Libera il flag per consentire il riconoscimento
 
+    Thread(target=run, daemon=True).start()
 
 
 def downtime_control():
@@ -682,9 +692,100 @@ def setVolume(azione):
         print(messages["error_messages"]["error_system"])
 
 
+# =========================
+#  HELPER
+# =========================
 
-def comrecon(comando):
+def contiene_parola(comando, parole):
+    return any(re.search(rf"\b{re.escape(p)}\b", comando) for p in parole)
 
+def rispondi_e_parla(messaggio):
+    print(botname + ": " + messaggio)
+    speak(messaggio)
+
+# =========================
+#  INTENT RECOGNITION
+# =========================
+
+def riconosci_intent(comando):
+    # PRIORITÀ: conferme
+    if uscita or riavvia:
+        return "confirm"
+
+    # RADIO
+    if re.search(r"\bradio\b", comando):
+        if contiene_parola(comando, messages["objects"]["list"]):
+            return "radio_list"
+        if contiene_parola(comando, messages["objects"]["graphic"]):
+            return "radio_gui"
+        if contiene_parola(comando, messages["commands"]["turnoff"]):
+            return "radio_off"
+        if contiene_parola(comando, messages["commands"]["silent"]):
+            return "radio_volume"
+        if contiene_parola(comando, messages["commands"]["change"] + messages["commands"]["open"]):
+            return "radio_change"
+        return "radio_generic"
+
+    # SISTEMA
+    if contiene_parola(comando, messages["commands"]["turnoff"]) and contiene_parola(comando, messages["objects"]["pc"]):
+        return "shutdown"
+
+    if contiene_parola(comando, messages["commands"]["restart"]) and contiene_parola(comando, messages["objects"]["pc"]):
+        return "reboot"
+
+    if contiene_parola(comando, messages["commands"]["update"]) and contiene_parola(comando, messages["objects"]["pc"]):
+        return "update"
+
+    # VOLUME
+    if "volume" in comando:
+        return "volume"
+
+    # OPEN
+    if contiene_parola(comando, messages["commands"]["open"]):
+        return "open"
+
+    # CLOSE
+    if contiene_parola(comando, messages["commands"]["close"]):
+        return "close"
+
+    # SEARCH
+    if contiene_parola(comando, messages["commands"]["search"]):
+        return "search"
+
+    # AI DIRETTA
+    if contiene_parola(comando, messages["commands"]["getAI"]) and "youtube" not in comando:
+        return "ai_direct"
+
+    return "unknown"
+
+# =========================
+#  AZIONI SISTEMA
+# =========================
+
+def aggiorna_sistema():
+    sistema = platform.system().lower()
+
+    rispondi_e_parla(messages["other_messages"]["update_in_progress"])
+
+    if sistema == "linux":
+        ambiente = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+
+        if "kde" in ambiente:
+            subprocess.run(["pkcon", "update", "-y"])
+        else:
+            subprocess.run(["sudo", "apt", "update"])
+            subprocess.run(["sudo", "apt", "upgrade", "-y"])
+
+    elif sistema == "windows":
+        os.system("winget upgrade --all")
+
+    rispondi_e_parla(messages["other_messages"]["update_completed"])
+
+# =========================
+# ROUTER INTENTI
+# =========================
+
+def esegui_intent(intent, comando):
     global attivo, listreplybot, listsaluti, main_path, radios_json, time_start, uscita, riavvia,youtubeopen,messaggio,parla_sintesi
     attendi_conferma = True
     listaprogrammi = main_path / "data/listaprogrammi"
@@ -696,218 +797,174 @@ def comrecon(comando):
     # Normalizzazione del comando
     comando = comando.lower().strip()
 
-    comandomod = adattalingua(comando)  # Funzione per adattare la lingua
-    comando = comandomod
+    # =====================
+    # CONFERME
+    # =====================
+    if intent == "confirm":
+        if "no" in comando:
+            uscita = False
+            riavvia = False
+            rispondi_e_parla("Operazione annullata")
+            return
 
-    # Scrive lo stato dell'assistente
-    scrivistatus()
-    time_start = time.perf_counter()
+        if contiene_parola(comando, messages["commands"]["reply"]):
+            sistema = platform.system().lower()
 
-    def rispondi_e_parla(messaggio):
-        print(botname + ": " + messaggio)
-        speak(messaggio)
+            if uscita:
+                rispondi_e_parla("Spengo il sistema")
+                if sistema == "linux":
+                    os.system("shutdown -h now")
+                elif sistema == "windows":
+                    os.system("shutdown /s /f /t 0")
 
-    def conferma_uscita(): #resa cross-platform
-     global uscita
+            elif riavvia:
+                rispondi_e_parla("Riavvio il sistema")
+                if sistema == "linux":
+                    os.system("reboot")
+                elif sistema == "windows":
+                    os.system("shutdown /r /f /t 0")
 
-     if "no" in comando.lower():
-        uscita = False
-        rispondi_e_parla(messages["other_messages"]["shutdown_cancelled"])
+        return "done"
 
-     elif any(re.search(pattern, comando, re.IGNORECASE) for pattern in risposte_comando):   #se la risposta è si ,certo ,certamente
+    # =====================
+    # RADIO
+    # =====================
+    if intent == "radio_list":
+        rispondi_e_parla(messages["other_messages"]["radio_list"])
+        lista_radio_csv()
 
-        rispondi_e_parla(random.choice(messages["other_messages"]["shutdown_executed"])) # risponde con spegnimento del sistema
-        rispondi_e_parla(random.choice(listsaluti))
+    elif intent == "radio_gui":
+        rispondi_e_parla("Apro PyRadio")
+        subprocess.Popen(["pyradio"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        if sistema == "linux":
-            # Spegnimento su Linux
-            #print(sistema)
-            os.system("shutdown -h now")
-        elif sistema == "windows":
-            # Spegnimento su Windows
-            os.system("shutdown /s /f /t 0")
-        elif sistema == "darwin":  # macOS
-            # Spegnimento su macOS
-            os.system("sudo shutdown -h now")
+    elif intent == "radio_change":
+        subprocess.run(["pkill", "ffplay"])
+        ricerca_stazione_csv(comando)
 
+    elif intent == "radio_off":
+        rispondi_e_parla(messages["other_messages"]["radio_closed"])
+        subprocess.run(["pkill", "ffplay"])
 
-
-
-    def conferma_riavvio(): #resa cross-platform
-     global riavvia
-
-     if "no" in comando:
-        rispondi_e_parla(messages["other_messages"]["reboot_cancelled"])
-        riavvia = False
-
-     elif any(re.search(pattern, comando, re.IGNORECASE) for pattern in risposte_comando):
-        rispondi_e_parla(messages["other_messages"]["reboot_executed"])
-
-
-        if sistema == "linux":
-            # Riavvio su Linux
-            os.system("sudo /sbin/reboot")
-        elif sistema == "windows":
-            # Riavvio su Windows
-            os.system("shutdown /r /f /t 0")
-        elif sistema == "darwin":  # macOS
-            # Riavvio su macOS
-            os.system("sudo shutdown -r now")
-        else:
-            rispondi_e_parla(messages["other_messages"]["reboot_failed"])
-
-
-
-    def esegui_com(comando):
-       global uscita,riavvia
-
-       # Funzione per determinare ed eseguire il comando ricevuto con comandi semplificati
-
-       if not parla_sintesi:
-          print(messages["other_messages"]["command"].format(comando=comando))  # Log del comando
-
-       #da tenere le funzioni riavvia e uscita in questo punto
-       if riavvia:
-           conferma_riavvio() #controllo del riavvio
-       if uscita:
-             conferma_uscita() #controllo dello spegnimento
-
-       if any(word in comando for word in messages["commands"]["exit"] + ["chiuditi"]) and any(word in comando for word in messages["objects"]["program"]):
-          rispondi_e_parla(random.choice(listsaluti))
-          estraipid(pid2)
-          os.kill(pid2, signal.SIGTERM)
-          exit()
-
-       if any(word in comando for word in messages["commands"]["restart"]) and any(word in comando  for word in messages["objects"]["pc"]):
-            rispondi_e_parla(messages["other_messages"]["command_confirmation"]) #Sei sicuro?
-            riavvia = True #variabile attiva per fare il controllo se riavviare effettivamente
-
-
-       if any(word in comando for word in messages["commands"]["turnoff"]) and any(word in comando for word in messages["objects"]["pc"]):
-           rispondi_e_parla(messages["other_messages"]["command_confirmation"]) #Sei sicuro?
-           uscita = True #variabile attiva per fare il controllo se riavviare effettivamente
-
-
-
-
-       if any(word in comando for word in messages["commands"]["open"]):
-          if "gestore" in comando and "file" in comando:
-            apri_gestore_file(".")
-          elif not apriBookmarks(listabookmarks, comando):
-            if not apriProgrammi(listaprogrammi, comando):
-              # Se non trovato né nei bookmarks né nei programmi, usa Groq
-              response = get_groq_response(comando)
-
-              # Supponiamo che la funzione restituisca una stringa contenente l'URL
-              url = estrai_url_da_rispostaIA(response)  # Da definire questa funzione
-
-              if url:
-                Thread(target=webbrowser.open, args=(url, 2), daemon=True).start()
-                speak("Pagina di " + comando.lower() + " aperta")
-              #else:
-               # speak("Non ho trovato nulla da aprire.")
-
-       #comando aggiornamento sistema cross-platform
-       if any(word in comando for word in messages["commands"]["update"]) and any(word in comando for word in messages["objects"]["pc"]):
-        rispondi_e_parla(messages["other_messages"]["update_in_progress"])
-        print (sistema)
-        if sistema == "linux":
-            # Rileva l'ambiente desktop su Linux
-            try:
-                ambiente = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
-                print (ambiente)
-            except Exception:
-                ambiente = ""
-
-            if "kde" in ambiente:
-                # Usa pkcon per gli utenti KDE Plasma
-                os.system("sudo pkcon update -y")
-            elif "gnome" in ambiente or "ubuntu" in ambiente:
-                # Usa apt per Ubuntu o GNOME
-                os.system("sudo apt update && sudo apt upgrade -y")
-            elif "xfce" in ambiente:
-                # Usa pacman o apt per Xfce
-                os.system("sudo pacman -Syu --noconfirm")  # Per Arch Linux
-            else:
-                # Default per altre distribuzioni
-                os.system("sudo apt update && sudo apt upgrade -y")
-
-        elif sistema == "windows":
-            # Aggiorna il sistema su Windows (con winget o choco)
-            try:
-                os.system("winget upgrade --all")
-            except Exception:
-                try:
-                    os.system("choco upgrade all -y")
-                except Exception as e:
-                    print(messages["error_messages"]["update_error"], e)
-
-        rispondi_e_parla(messages["other_messages"]["update_completed"])
-
-
-       if any(word in comando for word in messages["commands"]["close"]):
-          if any(word in comando for word in messages["objects"]["window"]):
-            rispondi_e_parla(messages["other_messages"]["notes_closed"])
-          else:
-            chiudiProgrammi(listaprogrammi, comando)
-
-       if "radio" in comando:
-          if any(word in comando for word in messages["objects"]["list"]):
-            rispondi_e_parla(messages["other_messages"]["radio_list"])
-            lista_radio_csv()
-          elif any(word in comando for word in messages["objects"]["graphic"]):
-            rispondi_e_parla("Apro la radio con PyRadio")
-            subprocess.Popen(["pyradio"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          elif any(word in comando for word in messages["commands"]["change"] + messages["commands"]["open"]):
-            os.system("pkill ffplay")
-            ricerca_stazione_csv(comando)
-          elif any(word in comando for word in messages["commands"]["turnoff"]):
-            rispondi_e_parla(messages["other_messages"]["radio_closed"])
-            os.system("pkill ffplay")
-          elif any(word in comando for word in messages["commands"]["silent"]):
-              setVolume(comando)
-
-       if "volume" in comando:
+    elif intent == "radio_volume":
         setVolume(comando)
 
-       #comandi per effettuare la ricerca o su youtube o tramite ia
-       if any(word in comando for word in messages["commands"]["search"]):
-          if "youtube" in comando or youtubeopen:
+    # =====================
+    # SISTEMA
+    # =====================
+    elif intent == "shutdown":
+        rispondi_e_parla(messages["other_messages"]["command_confirmation"])
+        uscita = True
+
+    elif intent == "reboot":
+        rispondi_e_parla(messages["other_messages"]["command_confirmation"])
+        riavvia = True
+
+    elif intent == "update":
+        aggiorna_sistema()
+
+    # =====================
+    # VOLUME
+    # =====================
+    elif intent == "volume":
+        setVolume(comando)
+
+    # =====================
+    # OPEN
+    # =====================
+    elif intent == "open":
+        if "gestore" in comando and "file" in comando:
+            apri_gestore_file(".")
+        elif not apriBookmarks(listabookmarks, comando):
+            if not apriProgrammi(listaprogrammi, comando):
+                return "fallback_ai"
+
+    # =====================
+    # CLOSE
+    # =====================
+    elif intent == "close":
+        chiudiProgrammi(listaprogrammi, comando)
+
+    # =====================
+    # SEARCH
+    # =====================
+    elif intent == "search":
+        if "youtube" in comando or youtubeopen:
             risultati = cerca_youtube(comando, max_risultati=5)
             for url in risultati:
                 webbrowser.open(url)
 
-       if any(word in comando for word in messages["commands"]["getAI"]) and "youtube" not in comando:
-         if "internet" not in comando:
-           #response = get_deepseek_response(comando)
-           response = get_groq_response(comando)
-           # Avvia la finestra delle note in un nuovo processo
-           subprocess.Popen([sys.executable, "-c", f"from script.assistente import notes; notes({repr(response)})"])
-         #else:
+    # =====================
+    # AI DIRETTA
+    # =====================
+    elif intent == "ai_direct":
+        response = get_groq_response(comando)
+        subprocess.Popen([
+            sys.executable,
+            "-c",
+            f"from script.assistente import notes; notes({repr(response)})"
+        ])
 
-           #with DDGS() as ddgs:
-             # results = ddgs.text("radio 80 vibes", max_results=1) #usa duckduckgo come ricerca
-           #for r in results:
-            #  print(r["href"])  # URL da aprire nel browser
+    elif intent == "unknown":
+        return "fallback_ai"
 
-       # ELSE: Tutti i comandi che non corrispondono alle condizioni precedenti
-       #else:
-          # Se nessuna delle condizioni precedenti è soddisfatta, invia la richiesta a AI per risposte generali
-          #response = get_groq_response(comando)
-          # Avvia la finestra delle note in un nuovo processo
-          #subprocess.Popen([sys.executable, "-c", f"from script.assistente import notes; notes({repr(response)})"])
+    return "done"
 
-    # Routine principale
+# =========================
+# 🤖 FALLBACK IA
+# =========================
+
+def fallback_ai(comando):
+    response = get_groq_response(comando)
+    url = estrai_url_da_rispostaIA(response)
+
+    if url:
+        webbrowser.open(url)
+        #speak("Apro quello che ho trovato")
+    #else:
+        #speak("Non ho trovato nulla")
+
+# =========================
+# 🎤 FUNZIONE PRINCIPALE
+# =========================
+
+def comrecon(comando):
+    global attivo, listreplybot, listsaluti, main_path, radios_json, time_start, uscita, riavvia,youtubeopen,messaggio,parla_sintesi
+    attendi_conferma = True
+    listaprogrammi = main_path / "data/listaprogrammi"
+    listabookmarks = main_path / "data/bookmarks"
+    pid1, pid2 = 0, 0
+    risposte_comando = messages["commands"]["reply"]  #equivale al si ,certo,certamente
+    sistema = platform.system().lower()
+
+    comando = comando.lower().strip()
+    comando = adattalingua(comando)
+
+    scrivistatus()
+    time_start = time.perf_counter()
+
     if not attivo:
-        if wakeword in comando:
+        if re.search(rf"\b{wakeword}\b", comando):
             attivo = True
             scrivistatus()
+
             if comando.strip() == wakeword:
                 rispondi_e_parla(random.choice(listreplybot))
             else:
-                esegui_com(comando)
+                esegui(comando)
     else:
-        esegui_com(comando)
+        esegui(comando)
+
+# =========================
+# 🚀 ESECUZIONE
+# =========================
+
+def esegui(comando):
+    intent = riconosci_intent(comando)
+
+    risultato = esegui_intent(intent, comando)
+
+    if risultato == "fallback_ai":
+        fallback_ai(comando)
 
 
 
@@ -1127,19 +1184,25 @@ def listen():
     with open(config_path, "w") as file:
             json.dump(config, file, indent=4)
 
+
+
     with sr.Microphone() as source:
-       #recognizer.adjust_for_ambient_noise(source, duration=1.0) #crea problemi di sensibilità
+       recognizer.adjust_for_ambient_noise(source, duration=1)
        Thread(target=grafica,daemon=True).start()
-       time.sleep(1)
+       time.sleep(0.1)
        print(messages["other_messages"]["waiting_wakeword"].format(botname=botname))
+
 
        while True:
             try:
+                if parla_sintesi:
+                         time.sleep(0.1)
+                         continue
                 #thread  per controllo periodico stato  assistente lasciare in questa posizione evita di dover fare il loop
                 Thread(target=downtime_control, daemon=True).start()
 
                 #Sequenza senza uso di thread
-                audio = recognizer.listen(source,timeout=5)
+                audio = recognizer.listen(source, timeout=3, phrase_time_limit=5)
                 comando = recognizer.recognize_google(audio,language="it-IT,en-US").lower()
                 comrecon(comando)
 
@@ -1149,7 +1212,7 @@ def listen():
                pass
             except sr.WaitTimeoutError:
                pass
-               #print ("Tempo scaduto in attesa della frase.Riprovo")
+
 
 
 
