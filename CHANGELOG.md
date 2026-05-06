@@ -1,4 +1,9 @@
 # Changelog
+
+# [3.4.0] -2026-05-06
+- Riscritto codice assistente.py per renderlo più leggibile nelle chiamate di comando
+- Risolto problema su chiamata funzione radio che mandava in loop la richiesta
+
 # [3.2.3] -2026-02-12
 -Inserito modello differente su ia groq . Disabilitato #model = "llama-3.1-8b-instant" e abilitato model = "openai/gpt-oss-120b"
 
