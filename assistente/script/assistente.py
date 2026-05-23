@@ -20,7 +20,6 @@
 #On UNIX, run the command below in the terminal
 #export GROQ_API_KEY=real api key
 
-
 import os
 import re
 import time
@@ -133,22 +132,6 @@ youtube = build("youtube", "v3", developerKey=api_key_youtube)
 #Groq API
 clientGroq = Groq(api_key=os.getenv("API_KEY"))
 
-#Deepseek API
-#clientDeepseek = OpenAI(
-  #base_url="https://openrouter.ai/api/v1",
-  #api_key=os.getenv("APY_KEY_DEEPSEEK")
-#)
-
-#def get_deepseek_response(text):
-  #italian_prompt = f"Rispondi in italiano.\nTesto dell'utente: {text}"
-  #response = clientDeepseek.chat.completions.create(
-     #model="deepseek/deepseek-r1:free",
-     #messages=[{"role": "user","content": italian_prompt}]
-  #)
-  #if response and hasattr(response, "choices") and response.choices:
-        #return response.choices[0].message.content
-  #return "Errore nella risposta dell'API."
-
 
 def get_groq_response(text):
     """Funzione per ottenere risposta da Groq AI."""
@@ -215,21 +198,14 @@ def cerca_youtube(query, max_risultati=5):
 
 
 def speak(text):
-    #Sintesi vocale del testo fornito.
     global parla_sintesi
 
-    def run():
-        global parla_sintesi
-        try:
-          parla_sintesi = True # Imposta il flag per bloccare il riconoscimento
-          tts = gTTS(text=text, lang='it')
-          tts.save("response.mp3")
-          playsound("response.mp3")
-          os.remove("response.mp3")
-        finally:
-          parla_sintesi = False  # Libera il flag per consentire il riconoscimento
-
-    Thread(target=run, daemon=True).start()
+    parla_sintesi = True
+    tts = gTTS(text=text, lang='it')
+    tts.save("response.mp3")
+    playsound("response.mp3")
+    os.remove("response.mp3")
+    parla_sintesi = False
 
 
 def downtime_control():
@@ -490,8 +466,6 @@ def apriProgrammi(listaprogrammi, comando):
 
         #if musicprog == "" or get_default_mp3_app() != musicprog : #disabilitato in modo che ogni volta esegua il controllo
 
-
-
         try:
             speak(messages["other_messages"]["music_player_opened"].format(musicprog=musicprog))
             os.system(musicprog+"&")  # Sostituisce os.system
@@ -692,10 +666,6 @@ def setVolume(azione):
         print(messages["error_messages"]["error_system"])
 
 
-# =========================
-#  HELPER
-# =========================
-
 def contiene_parola(comando, parole):
     return any(re.search(rf"\b{re.escape(p)}\b", comando) for p in parole)
 
@@ -735,6 +705,13 @@ def riconosci_intent(comando):
 
     if contiene_parola(comando, messages["commands"]["update"]) and contiene_parola(comando, messages["objects"]["pc"]):
         return "update"
+
+    # CHIUSURA ASSISTENTE
+    if (
+        contiene_parola(comando, messages["commands"]["exit"] + ["chiuditi"])
+        and contiene_parola(comando, messages["objects"]["program"])
+    ):
+        return "assistant_exit"
 
     # VOLUME
     if "volume" in comando:
@@ -782,16 +759,14 @@ def aggiorna_sistema():
     rispondi_e_parla(messages["other_messages"]["update_completed"])
 
 # =========================
-# ROUTER INTENTI
+# ESEGUI INTENTI
 # =========================
 
 def esegui_intent(intent, comando):
-    global attivo, listreplybot, listsaluti, main_path, radios_json, time_start, uscita, riavvia,youtubeopen,messaggio,parla_sintesi
-    attendi_conferma = True
+    global listsaluti, main_path, uscita, riavvia, youtubeopen, pid2
     listaprogrammi = main_path / "data/listaprogrammi"
     listabookmarks = main_path / "data/bookmarks"
     pid1, pid2 = 0, 0
-    risposte_comando = messages["commands"]["reply"]  #equivale al si ,certo,certamente
     sistema = platform.system().lower()
 
     # Normalizzazione del comando
@@ -804,25 +779,33 @@ def esegui_intent(intent, comando):
         if "no" in comando:
             uscita = False
             riavvia = False
-            rispondi_e_parla("Operazione annullata")
+            rispondi_e_parla(messages["other_messages"]["shutdown_cancelled"])
             return
 
         if contiene_parola(comando, messages["commands"]["reply"]):
-            sistema = platform.system().lower()
 
             if uscita:
-                rispondi_e_parla("Spengo il sistema")
+                rispondi_e_parla(random.choice(messages["other_messages"]["shutdown_executed"]))
+                rispondi_e_parla(random.choice(listsaluti))
                 if sistema == "linux":
                     os.system("shutdown -h now")
                 elif sistema == "windows":
                     os.system("shutdown /s /f /t 0")
+                elif sistema == "darwin":  # macOS
+                    os.system("sudo shutdown -h now")
+
+
 
             elif riavvia:
-                rispondi_e_parla("Riavvio il sistema")
+                rispondi_e_parla(messages["other_messages"]["reboot_executed"])
                 if sistema == "linux":
                     os.system("reboot")
                 elif sistema == "windows":
                     os.system("shutdown /r /f /t 0")
+                elif sistema == "darwin":  # macOS
+                    os.system("sudo shutdown -r now")
+                else:
+                    rispondi_e_parla(messages["other_messages"]["reboot_failed"])
 
         return "done"
 
@@ -861,6 +844,15 @@ def esegui_intent(intent, comando):
 
     elif intent == "update":
         aggiorna_sistema()
+
+    # =====================
+    # CHIUSURA ASSISTENTE
+    # =====================
+    elif intent == "assistant_exit":
+        rispondi_e_parla(random.choice(listsaluti))
+        estraipid(pid2)
+        os.kill(pid2, signal.SIGTERM)
+        exit()
 
     # =====================
     # VOLUME
@@ -1189,9 +1181,8 @@ def listen():
     with sr.Microphone() as source:
        recognizer.adjust_for_ambient_noise(source, duration=1)
        Thread(target=grafica,daemon=True).start()
-       time.sleep(0.1)
+       time.sleep(1)
        print(messages["other_messages"]["waiting_wakeword"].format(botname=botname))
-
 
        while True:
             try:
