@@ -736,27 +736,57 @@ def riconosci_intent(comando):
     return "unknown"
 
 # =========================
-#  AZIONI SISTEMA
+#  AGGIORNA SISTEMA
 # =========================
 
 def aggiorna_sistema():
     sistema = platform.system().lower()
+    print(sistema)
 
     rispondi_e_parla(messages["other_messages"]["update_in_progress"])
 
-    if sistema == "linux":
-        ambiente = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+    processi = []
+    ambiente = ""
 
-        if "kde" in ambiente:
-            subprocess.run(["pkcon", "update", "-y"])
-        else:
-            subprocess.run(["sudo", "apt", "update"])
-            subprocess.run(["sudo", "apt", "upgrade", "-y"])
+    try:
+        if sistema == "linux":
+            ambiente = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+            print(ambiente)
 
-    elif sistema == "windows":
-        os.system("winget upgrade --all")
+            if "kde" in ambiente:
+                processi.append(subprocess.Popen(["sudo", "pkcon", "update", "-y"]))
 
-    rispondi_e_parla(messages["other_messages"]["update_completed"])
+            elif "gnome" in ambiente or "ubuntu" in ambiente:
+                processi.append(subprocess.Popen(["sudo", "apt", "update"]))
+                processi.append(subprocess.Popen(["sudo", "apt", "upgrade", "-y"]))
+
+            elif "xfce" in ambiente:
+                processi.append(subprocess.Popen(["sudo", "pacman", "-Syu", "--noconfirm"]))
+
+            else:
+                processi.append(subprocess.Popen(["sudo", "apt", "update"]))
+                processi.append(subprocess.Popen(["sudo", "apt", "upgrade", "-y"]))
+
+        elif sistema == "windows":
+            try:
+                processi.append(subprocess.Popen(["winget", "upgrade", "--all"]))
+            except Exception:
+                try:
+                    processi.append(subprocess.Popen(["choco", "upgrade", "all", "-y"]))
+                except Exception as e:
+                    print(messages["error_messages"]["update_error"], e)
+
+    except Exception as e:
+        print("Errore update:", e)
+        return
+
+    def wait_updates():
+        for p in processi:
+            p.wait()
+
+        rispondi_e_parla(messages["other_messages"]["update_completed"])
+
+    threading.Thread(target=wait_updates, daemon=True).start()
 
 # =========================
 # ESEGUI INTENTI
