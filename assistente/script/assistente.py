@@ -47,9 +47,9 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject,Slot,Signal,QTimer
 #AI importate
 from groq import Groq
-from openai import OpenAI
+#from openai import OpenAI
 from googleapiclient.discovery import build #serve per youtube api
-from ddgs import DDGS #effettua ricerche di indirizzi tramite duckduckgo
+#from ddgs import DDGS #effettua ricerche di indirizzi tramite duckduckgo
 
 
 load_dotenv()
@@ -777,7 +777,7 @@ def aggiorna_sistema():
                     print(messages["error_messages"]["update_error"], e)
 
     except Exception as e:
-        print("Errore update:", e)
+        print(messages["error_messages"]["update_error"], e)
         return
 
     def wait_updates():
