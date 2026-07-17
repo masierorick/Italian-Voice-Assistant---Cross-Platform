@@ -1,0 +1,19 @@
+[Desktop Entry]
+Categories=Utility
+Comment[it_IT]= Assistente vocale cross-platform
+Comment= Vocal assistant cross-platform
+Exec=python3 {HOME}/.local/lib/python3.12/site-packages/assistente/main.py
+GenericName[it_IT]=Assistente vocale
+GenericName=Assistente vocale
+Icon={HOME}/.local/lib/python3.12/site-packages/assistente/resources/icon.png
+MimeType=
+Name[it_IT]=Assistente vocale
+Name=Vocal assistant
+NoDisplay=false
+Path={HOME}/.local/lib/python3.12/site-packages/assistente
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=
