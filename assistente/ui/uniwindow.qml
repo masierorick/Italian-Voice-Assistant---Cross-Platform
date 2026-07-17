@@ -32,7 +32,7 @@ ApplicationWindow {
 
     Timer {
         id: settingsCheckTimer
-        interval: 1000
+        interval: 200
         running: true
         repeat: true
         onTriggered: {
@@ -222,6 +222,7 @@ ApplicationWindow {
              let mousePos = mapToItem(flickable, wheel.x, wheel.y);
              if (mousePos.x >= 0 && mousePos.y >= 0 && mousePos.x < flickable.width && mousePos.y < flickable.height) {
                     // L'evento è dentro la Flickable, lascia che scorra il testo
+                    wheel.accepted = false;
                     return;
             }
 
