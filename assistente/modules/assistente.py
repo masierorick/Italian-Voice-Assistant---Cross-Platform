@@ -175,11 +175,16 @@ def comrecon(comando):
                 rispondi_e_parla(random.choice(listreplybot))
             else:
                 comando_pulito = re.sub(rf"\b{wakeword}\b", "", comando).strip()
+                if not parla_sintesi:
+                       print(messages["other_messages"]["command"].format(comando=comando_pulito))
+
                 esegui(comando_pulito)
     else:
         # Rimuove wakeword anche quando già attivo
         comando_pulito = re.sub(rf"\b{wakeword}\b", "", comando).strip()
         if comando_pulito:
+            if not parla_sintesi:
+                print(messages["other_messages"]["command"].format(comando=comando_pulito))
             esegui(comando_pulito)
         else:
             rispondi_e_parla(random.choice(listreplybot))
