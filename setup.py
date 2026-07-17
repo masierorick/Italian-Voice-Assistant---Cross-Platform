@@ -82,7 +82,7 @@ setup(
             "ui/*.png",
             "data/*.*",
             "data/*.csv",
-            "script/.env",
+            #"script/.env",
             "config/*.json",
             "resources/*.png",
             "resources/*.desktop"

@@ -1,5 +1,4 @@
 comtypes>=1.4.15
-ddgs>=9.10.0
 google_api_python_client>=2.154.0
 groq>=1.0.0
 gTTS>=2.5.4

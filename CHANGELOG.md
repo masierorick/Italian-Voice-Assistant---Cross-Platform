@@ -1,4 +1,10 @@
 # Changelog
+# [3.5.0] -2026-07-17 
+- Diviso il programma assistente monolitico in diversi moduli e spostati tutti nella sottodirectory /modules
+- eliminati i files notepid.py, pid.py e status.py che servivono solo per una variabile e importati tutte le variabile sotto un unico fil in /data/state.json e modificato il programma per leggerlo 
+- inserito il comando rispondi e parla dove c'erà solo speak per visualizzare nella ui quanto detto dal botname 
+- modificato il file main.py per avviare listan da /modules/assistente
+- inserita la possibilità di eseguire il programma offline con whisper e piper 
 
 # [3.4.0] -2026-05-06
 - Riscritto codice assistente.py per renderlo più leggibile nelle chiamate di comando
