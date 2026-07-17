@@ -35,9 +35,6 @@ def esegui_intent(intent, comando):
     # Normalizzazione del comando
     comando = comando.lower().strip()
 
-    #Stampa a video il comando
-    if not parla_sintesi:
-          print(messages["other_messages"]["command"].format(comando=comando))  # Log del comando
 
 
     # =====================
