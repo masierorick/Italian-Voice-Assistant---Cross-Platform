@@ -20,6 +20,8 @@ from modules.config import (
 
 from modules.ai import *
 from modules.system import *
+from modules.pid import *
+
 
 # =========================
 # ESEGUI INTENTI
@@ -91,7 +93,7 @@ def esegui_intent(intent, comando):
 
     elif intent == "radio_off":
         rispondi_e_parla(messages["other_messages"]["radio_closed"])
-        subprocess.run(["pkill", "ffplay"])
+        stop_radio()
 
     elif intent == "radio_volume":
         setVolume(comando)
@@ -115,7 +117,7 @@ def esegui_intent(intent, comando):
     # =====================
     elif intent == "assistant_exit":
         rispondi_e_parla(random.choice(listsaluti))
-        estraipid(pid2)
+        pid2 = estraipid()
         os.kill(pid2, signal.SIGTERM)
         exit()
 

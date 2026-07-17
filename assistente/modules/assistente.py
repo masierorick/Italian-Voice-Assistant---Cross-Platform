@@ -65,7 +65,9 @@ from modules.tts import *
 from modules.network import ONLINE_MODE
 from modules.radio import *
 from modules.system import *
-from modules.audio_filter import init_audio_filter
+from modules.audio_filter import init_audio_filter, get_audio_source
+from modules.pid import *
+
 
 
 
@@ -86,29 +88,9 @@ if platform.system() == "Linux":
 
 
 
-def load_state():
-    default = {"attivo": False, "pid2": 0, "note_pids": []}
-    if not STATE_FILE.exists():
-        return default
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return default
-
-
-
-def save_state(state):
-    tmp = STATE_FILE.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-    tmp.replace(STATE_FILE)
-
-
-
 def downtime_control():
    #Controlla l'inattività dell'assistente.
-   global attivo,time_start,sleep_time
+   global attivo,time_start,sleep_time,uscita,riavvia
 
    if attivo and time.perf_counter() - time_start >= sleep_time:
 
@@ -118,31 +100,6 @@ def downtime_control():
         riavvia = False
         scrivistatus()
         print(f"{botname} in stand-by.")
-
-
-
-def scrivistatus():
-    global attivo
-
-    # === Salva il PID del processo nel JSON ===
-    state = load_state()
-    state["attivo"] = attivo
-    save_state(state)
-
-
-
-def estraipid(pid2):
-
-  pattern = r'(\w+)\s*=\s*(.*)'  #\w+ corrisponde alla variabile, .* al valore dopo '='
-  with open(STATE_FILE, 'r') as file:
-    for numero_riga, riga in enumerate(file, 1):
-       match = re.match(pattern, riga.strip())  # Cerca la corrispondenza
-       if match:
-            variabile = match.group(1)  # Variabile (prima del '=')
-            if "pid2" in variabile:
-              pid2 = int(match.group(2))  # Valore (dopo '=')
-
-
 
 
 
@@ -241,10 +198,11 @@ class AnimationManager(QObject):
 
     @Slot()  # Slot per chiusura finestre UI
     def stop_process(self):
-        pid2 = 0
+
         QApplication.quit()  # Termina l'applicazione
-        estraipid(pid2)
-        os.kill(pid2, signal.SIGTERM)
+        pid2 = estraipid()
+        if pid2:
+          os.kill(pid2, signal.SIGTERM)
         exit()
 
     @Slot()
@@ -357,8 +315,8 @@ def animazione():
 recognizer = sr.Recognizer()
 recognizer.dynamic_energy_threshold = True
 recognizer.energy_threshold = 300
-recognizer.pause_threshold = 0.8
-recognizer.non_speaking_duration = 0.5
+recognizer.pause_threshold = 1.2
+recognizer.non_speaking_duration = 0.8
 
 def comrecon(comando):
     global attivo, listreplybot, listsaluti, main_path, time_start, uscita, riavvia, youtubeopen, messaggio, parla_sintesi
@@ -368,14 +326,14 @@ def comrecon(comando):
     pid2 = 0
     comando = comando.lower().strip()
     comando = adattalingua(comando)
-    scrivistatus()
-    time_start = time.perf_counter()
 
 
     if not attivo:
         if re.search(rf"\b{wakeword}\b", comando):
             attivo = True
+            time_start = time.perf_counter()
             scrivistatus()
+
 
             if comando.strip() == wakeword:
                 rispondi_e_parla(random.choice(listreplybot))
@@ -386,15 +344,20 @@ def comrecon(comando):
 
                 esegui(comando_pulito)
     else:
-        # Rimuove wakeword anche quando già attivo
+         # Rimuove wakeword anche quando già attivo
         comando_pulito = re.sub(rf"\b{wakeword}\b", "", comando).strip()
         if comando_pulito:
+            intent = riconosci_intent(comando_pulito)
+            if intent == "unknown":
+                # Parlato non riconosciuto come comando (TV, altre persone, rumore): ignora, nessuna UI/esecuzione
+                return
             if not parla_sintesi:
                 print(messages["other_messages"]["command"].format(comando=comando_pulito))
-            esegui(comando_pulito)
+            risultato = esegui_intent(intent, comando_pulito)
+            if risultato == "fallback_ai":
+                fallback_ai(comando_pulito)
         else:
             rispondi_e_parla(random.choice(listreplybot))
-
 
 
 #===============================
@@ -404,9 +367,11 @@ def comrecon(comando):
 
 def listen():
     """Ciclo principale di ascolto."""
-    global time_start,parla_sintesi,layout,musicprog
+    global time_start,parla_sintesi,layout,musicprog,tts_end_time
 
-    #determinazione layoutgrafico
+
+
+    #determinazione layout grafico
     if layout == "main":
         grafica = animazione
     else:
@@ -429,14 +394,12 @@ def listen():
         stt_mode = "Whisper Offline"
 
     # attiva AEC se disponibile
-    aec_device = init_audio_filter()
+    init_audio_filter()
 
-    if aec_device:
-        print("🎤 Microfono AEC attivo")
-        mic = sr.Microphone(device_index=aec_device)
-    else:
-        print("🎤 Microfono standard")
-        mic = sr.Microphone()
+    mic = get_audio_source()
+    if isinstance(mic, sr.Microphone):
+       print("🎤 Microfono configurato")
+
 
     with mic as source:
        recognizer.adjust_for_ambient_noise(source, duration=1)
@@ -450,6 +413,9 @@ def listen():
        while True:
             try:
                 if parla_sintesi:
+                         time.sleep(0.1)
+                         continue
+                if time.time() < tts_end_time:
                          time.sleep(0.1)
                          continue
                 #thread  per controllo periodico stato  assistente lasciare in questa posizione evita di dover fare il loop

@@ -1,11 +1,12 @@
 import os, subprocess, soundfile as sf
-
+import time
 from playsound import playsound
 from gtts import gTTS
 
 from modules.config import *
 from modules.network import ONLINE_MODE
 
+tts_end_time = 0
 
 
 # =========================
@@ -40,15 +41,14 @@ def speak_piper(text):
 # =========================
 def speak(text):
 
-    global parla_sintesi
+    global parla_sintesi, tts_end_time
 
     parla_sintesi = True
 
     # Modalità online: usa Google TTS
     # Se fallisce passa automaticamente al TTS offline
-    if ONLINE_MODE:
-
-
+    try:
+      if ONLINE_MODE:
         try:
             tts = gTTS(text=text, lang="it")
             tts.save("response.mp3")
@@ -60,13 +60,18 @@ def speak(text):
 
 
 
-    # Modalità offline
-    else:
+      # Modalità offline
+      else:
         speak_piper(text)
 
 
-    parla_sintesi = False
+    finally:
+        # lascia svuotare il buffer audio
+        time.sleep(0.8)
 
+        tts_end_time = time.time() + 1.0
+
+        parla_sintesi = False
 
 
 # =========================

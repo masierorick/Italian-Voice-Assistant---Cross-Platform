@@ -2,9 +2,15 @@ import csv
 import sys
 import shutil
 import subprocess
-from threading import Thread
+import queue
+import threading
 from modules.config import *
 from modules.tts import speak
+
+radio_process = None
+radio_reference = None
+ffmpeg_process = None
+radio_running = False
 
 
 def lista_radio_csv():
@@ -41,18 +47,87 @@ def ricerca_stazione_csv(comando):
 
 
 
-def play_radio_csv(stazione,url):
+def play_radio_csv(stazione, url):
     """Avvia una stazione radio."""
-    if not shutil.which("ffplay"):
+
+    global radio_process, radio_reference
+
+    if not shutil.which("ffmpeg"):
         speak("Installa ffmpeg per riprodurre la radio.")
         return
+
     print(messages["other_messages"]["radio_run"].format(stazione=stazione))
 
-    #modifica per eseguire in un thread la radio e alleggerire il programma
     def start_radio():
-        subprocess.Popen(["ffplay", "-nodisp", "-loglevel", "panic", url],
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
 
-    Thread(target=start_radio, daemon=True).start()
+        global radio_process, radio_reference
 
+        audio_queue = queue.Queue(maxsize=50)
+        global ffmpeg_process
+        ffmpeg_process = subprocess.Popen(["ffmpeg", "-i", url, "-f", "s16le", "-ar", "48000", "-ac", "2", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+        def read_audio(ffmpeg):
+            while True:
+                data = ffmpeg.stdout.read(4096)
+
+                if not data:
+                    break
+
+                try:
+                    audio_queue.put(data, timeout=1)
+                except queue.Full:
+                    pass
+
+        threading.Thread(target=read_audio, args=(ffmpeg_process,), daemon=True).start()
+
+        class RadioReference:
+            def read(self, size):
+                try:
+                    return audio_queue.get(timeout=1)
+                except queue.Empty:
+                    return b""
+
+        radio_reference = RadioReference()
+
+        from modules.audio_filter import set_radio_reference
+        set_radio_reference(radio_reference)
+        global radio_process
+        radio_process = subprocess.Popen(["ffplay", "-nodisp", "-loglevel", "panic", "-f", "s16le", "-ar", "48000", "-ac", "2", "-"], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        while True:
+            data = audio_queue.get()
+
+            if not data:
+                 break
+
+            try:
+              if radio_process.poll() is not None:
+                break
+
+              radio_process.stdin.write(data)
+              radio_process.stdin.flush()
+
+            except (BrokenPipeError, OSError):
+               break
+
+    threading.Thread(target=start_radio, daemon=True).start()
+
+def stop_radio():
+
+    global radio_process, ffmpeg_process, radio_running
+
+    radio_running = False
+
+    if radio_process:
+        try:
+            radio_process.terminate()
+        except:
+            pass
+        radio_process = None
+
+    if ffmpeg_process:
+        try:
+            ffmpeg_process.terminate()
+        except:
+            pass
+        ffmpeg_process = None
